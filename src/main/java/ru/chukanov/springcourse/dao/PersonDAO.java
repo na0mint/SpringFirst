@@ -1,75 +1,107 @@
 package ru.chukanov.springcourse.dao;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.BatchPreparedStatementSetter;
+import org.springframework.jdbc.core.BeanPropertyRowMapper;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import ru.chukanov.springcourse.models.Person;
 
-import java.sql.*;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 @Component
 public class PersonDAO {
-    private static int PEOPLE_COUNT;
 
-    private static final String URL = "jdbc:postgresql://localhost:5432/first_db";
-    private static final String USERNAME = "postgres";
-    private static final String PASSWORD = "kolay";
+    private final JdbcTemplate jdbcTemplate;
 
-    private static Connection connection;
-
-    {
-        try {
-            connection = DriverManager.getConnection(URL, USERNAME, PASSWORD);
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
-        }
+    @Autowired
+    public PersonDAO(JdbcTemplate jdbcTemplate) {
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     public List<Person> index() {
-        List<Person> people = new ArrayList<>();
+        return jdbcTemplate.query("SELECT * FROM Person", new BeanPropertyRowMapper<>(Person.class));
+    }
 
-        try {
-            Statement statement = connection.createStatement();
-            String SQL = "SELECT * FROM person";
-            ResultSet resultSet =  statement.executeQuery(SQL);
-
-            while(resultSet.next()) {
-                Person person = new Person();
-
-                person.setId(resultSet.getInt("id"));
-                person.setName(resultSet.getString("name"));
-                person.setAge(resultSet.getInt("age"));
-                person.setEmail(resultSet.getString("email"));
-
-                people.add(person);
-            }
-
-        } catch (SQLException e) {
-            throw new RuntimeException(e);
-        }
-
-        return people;
+    public Optional<Person> show(String email) {
+        return jdbcTemplate.query("SELECT * FROM Person WHERE email=?", new Object[]{email},
+                new BeanPropertyRowMapper<>(Person.class)).stream().findAny();
     }
 
     public Person show(int id) {
-        //return people.stream().filter(person -> person.getId() == id).findAny().orElse(null);
-        return null;
+        return jdbcTemplate.query("SELECT * FROM Person WHERE id=?", new Object[]{id}, new BeanPropertyRowMapper<>(Person.class))
+                .stream().findAny().orElse(null);
     }
 
     public void save(Person person) {
-        //person.setId(++PEOPLE_COUNT);
-        //people.add(person);
+        jdbcTemplate.update("INSERT INTO Person(name, age, email) VALUES(?, ?, ?)", person.getName(), person.getAge(),
+                person.getEmail());
     }
 
     public void update(int id, Person updatedPerson) {
-       // Person personToBeUpdated = show(id);
-
-        //personToBeUpdated.setName(updatedPerson.getName());
-        //personToBeUpdated.setAge(updatedPerson.getAge());
-        //personToBeUpdated.setEmail(updatedPerson.getEmail());
+        jdbcTemplate.update("UPDATE Person SET name=?, age=?, email=? WHERE id=?",
+                updatedPerson.getName(), updatedPerson.getAge(), updatedPerson.getEmail(), id);
     }
 
     public void delete(int id) {
-        //people.removeIf(p -> p.getId() == id);
+        jdbcTemplate.update("DELETE FROM Person WHERE id=?", id);
+    }
+
+    ///////////////////////
+    /////  Batch test//////
+    ///////////////////////
+
+    public void testMultipleUpdate() {
+        List<Person> people = create1000people();
+
+        long before = System.currentTimeMillis();
+
+        for (Person person : people) {
+            jdbcTemplate.update("INSERT INTO Person VALUES(?, ?, ?, ?)",
+                    person.getId(), person.getName(), person.getAge(), person.getEmail());
+        }
+
+        long after = System.currentTimeMillis();
+
+        System.out.println("Time: " + (after - before));
+    }
+
+    public void testBatchUpdate() {
+        List<Person> people = create1000people();
+
+        long before = System.currentTimeMillis();
+
+        jdbcTemplate.batchUpdate("INSERT INTO Person VALUES(?, ?, ?, ?)", new BatchPreparedStatementSetter() {
+            @Override
+            public void setValues(PreparedStatement preparedStatement, int i) throws SQLException {
+                preparedStatement.setInt(1, people.get(i).getId());
+                preparedStatement.setString(2, people.get(i).getName());
+                preparedStatement.setInt(3, people.get(i).getAge());
+                preparedStatement.setString(4, people.get(i).getEmail());
+            }
+
+            @Override
+            public int getBatchSize() {
+                return people.size();
+            }
+        });
+
+        long after = System.currentTimeMillis();
+
+        System.out.println("Time: " + (after - before));
+    }
+
+    private List<Person> create1000people() {
+        List<Person> people = new ArrayList<>();
+
+        for (int i = 0; i < 1000; i++) {
+            people.add(new Person(i, "Name" + i, 30, "test" + i + "mail.ru"));
+        }
+
+        return people;
     }
 }
